@@ -6,19 +6,18 @@ def main():
     st.set_page_config(page_title="Aplicación Multi-Pantalla", layout="wide")
     
     # Sidebar para navegación
-    menu = ["Inicio", "Registro/Login", "Vista de Archivos", "Dashboard", "Configuraciones"]
+    menu = ["Inicio", "Registro/Login", "Vista de Archivos"]
     choice = st.sidebar.selectbox("Selecciona una pantalla", menu)
+    
+    # Campo de entrada para el límite máximo de gasto
+    max_total = st.sidebar.number_input("Ingrese el valor máximo permitido", min_value=0.0, format="%.2f", key="max_total")
     
     if choice == "Inicio":
         inicio()
     elif choice == "Registro/Login":
         registro_login()
     elif choice == "Vista de Archivos":
-        vista_archivos()
-    elif choice == "Dashboard":
-        dashboard()
-    elif choice == "Configuraciones":
-        configuraciones()
+        vista_archivos(max_total)
 
 @st.cache_data
 def load_pdf(file):
@@ -47,7 +46,7 @@ def inicio():
         st.session_state["costos_excel"] = load_excel(costos_excel)
         st.success("Todos los archivos han sido cargados correctamente. Ahora puedes ir a la pantalla de Vista de Archivos.")
 
-def vista_archivos():
+def vista_archivos(max_total):
     # Navbar con número a la derecha
     st.markdown(
         """
@@ -70,10 +69,12 @@ def vista_archivos():
         habitaciones = st.session_state["resultados_csv"].iloc[:, 0].tolist()
         actividades = st.session_state["costos_excel"]
         estados = {}
+        subtotales = {}
         
         for habitacion in habitaciones:
             activo = habitacion.startswith("#")
-            estados[habitacion] = st.checkbox(habitacion, value=activo)
+            estados[habitacion] = st.checkbox(habitacion, value=activo, key=f"habitacion_{habitacion}")
+            subtotal = 0.0
             
             if estados[habitacion]:
                 with st.expander(f"Detalles de {habitacion}"):
@@ -83,7 +84,8 @@ def vista_archivos():
                         actividad = row.get("ACTIVIDAD DE OBRA - LISTA DE PRECIOS UNITARIOS", "")
                         unidad = row.get("Unidad", None)
                         item = row.get("Item", "")
-                        valor_unitario = row.get("Valor Unitario ofertado (**)", "N/A")
+                        valor_unitario = row.get("Valor Unitario ofertado (**)", 0.0)
+                        medicion = row.get("MEDICION", "")
                         
                         if pd.isna(unidad) or unidad == "":
                             if str(item).isdigit():
@@ -92,9 +94,34 @@ def vista_archivos():
                                 st.markdown(f"**{actividad}**")
                         else:
                             if row.get("ESPACIOS", "").upper() in [habitacion_tipo, "CASA"]:
-                                check = st.checkbox(f"{actividad}")
+                                check = st.checkbox(f"{actividad}", key=f"check_{habitacion}_{actividad}")
                                 if check:
-                                    st.write(f"Valor Unitario Ofertado: {valor_unitario}")
+                                    cantidad_key = f"cantidad_{habitacion}_{actividad}"
+                                    valor_guardado_key = f"valor_{habitacion}_{actividad}"
+                                    cantidad_format = "%.0f" if unidad in ["UN", "UND"] else "%.4f"
+                                    cantidad = st.number_input(f"Ingrese la cantidad.", min_value=0.0, format=cantidad_format, key=cantidad_key)
+                                    
+                                    if valor_guardado_key not in st.session_state:
+                                        st.session_state[valor_guardado_key] = 0.0
+                                    
+                                    if st.button(f"Guardar cantidad", key=f"button_{habitacion}_{actividad}"):
+                                        st.session_state[valor_guardado_key] = cantidad * valor_unitario
+                                        st.success(f"Valor guardado para {actividad}: ${st.session_state[valor_guardado_key]:,.2f}")
+                                    
+                                    subtotal += st.session_state[valor_guardado_key]
+            
+            subtotales[habitacion] = subtotal
+        
+        total_general = sum(subtotales.values())
+        st.sidebar.subheader("Subtotales por Habitación")
+        df_subtotales = pd.DataFrame(list(subtotales.items()), columns=["Habitación", "Subtotal ($)"]).round(2)
+        st.sidebar.dataframe(df_subtotales)
+        st.sidebar.subheader("Total General")
+        
+        if total_general > max_total:
+            st.sidebar.markdown(f"<span style='color: red; font-weight: bold;'>Total: ${total_general:,.2f}</span>", unsafe_allow_html=True)
+        else:
+            st.sidebar.markdown(f"Total: ${total_general:,.2f}")
 
 def registro_login():
     st.title("Registro o Inicio de Sesión")
@@ -115,18 +142,6 @@ def registro_login():
                 st.success("Registro exitoso. Ahora puedes iniciar sesión.")
             else:
                 st.error("Las contraseñas no coinciden.")
-
-def dashboard():
-    st.title("Dashboard")
-    st.write("Aquí puedes ver información importante sobre tu cuenta y datos clave.")
-    st.metric(label="Progreso", value="75%", delta="+5%")
-
-def configuraciones():
-    st.title("Configuraciones")
-    st.write("Ajustes de la cuenta y preferencias del usuario.")
-    tema = st.selectbox("Selecciona un tema", ["Claro", "Oscuro", "Automático"])
-    if st.button("Guardar Cambios"):
-        st.success("Configuraciones guardadas correctamente.")
 
 if __name__ == "__main__":
     main()
